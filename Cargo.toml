@@ -3,4 +3,13 @@ name = "piece_table"
 version = "0.1.0"
 edition = "2024"
 
+
+[lib]
+name = "piece_table" 
+path = "src/lib.rs"
+
+[[example]]
+name = "insert"
+path = "examples/insert.rs"
+
 [dependencies]

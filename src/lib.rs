@@ -31,7 +31,40 @@ pub struct PieceTable {
     metadata: TableMetadata,
 }
 
+impl Into<String> for PieceTable {
+    fn into(self) -> String {
+        self.to_string()
+    }
+}
+
+impl ToString for PieceTable {
+    fn to_string(&self) -> String {
+        let mut out = String::new();
+        // eprintln!("records: {:#?}", self.records);
+        for record in self.records.iter() {
+            let slice = match record.buf_kind {
+                BufKind::Original => {
+                    &self.original[(record.start as usize)..((record.start + record.len) as usize)]
+                }
+                BufKind::Add => {
+                    &self.add_buf[(record.start as usize)..((record.start + record.len) as usize)]
+                }
+            };
+            out.push_str(slice);
+        }
+        out
+    }
+}
+
 impl PieceTable {
+    pub fn new() -> Self {
+        Self {
+            original: String::new(),
+            add_buf: String::new(),
+            records: Vec::new(),
+            metadata: TableMetadata::new(),
+        }
+    }
     pub fn from_path(_: &str) -> Self {
         let text = String::from(include_str!("../samples/daffodils.txt"));
         let text_len = text.len();
@@ -61,48 +94,43 @@ impl PieceTable {
         }
     }
 
-    pub fn insert_chunk(&mut self, at: usize, content: &str) {
-        if content.len() > u32::MAX as usize {
-            return;
+    pub fn insert_at_end(&mut self, ch: char) {
+        // insert at the end implementation
+        match self.records.last() {
+            Some(PieceTableRecord {
+                buf_kind: BufKind::Add,
+                start,
+                len,
+            }) if (start + len) == self.add_buf.len() as u32 => {
+                // the last record might point to a different part of addBuf to reduce memory usage
+                // while copy pasting chunks of text.
+
+                let last_record = self.records.last_mut().unwrap();
+                self.add_buf.push(ch);
+                last_record.len += 1;
+                self.metadata.text_len += 1;
+            }
+            Some(_) | None => {
+                //add char to addBuf, create new record and add it to records
+                self.add_buf.push(ch);
+                let new_record = PieceTableRecord {
+                    buf_kind: BufKind::Add,
+                    start: (self.add_buf.len() - 1) as u32,
+                    len: 1,
+                };
+                eprintln!("I am going to add: {:#?}", new_record);
+                self.push_record(new_record);
+            }
         }
-        /* eprintln!(
-            "content to be inserted: \nlen = {} \ncontents: `{}`",
-            content.len(),
-            content
-        ); */
-        let (record_index, char_index) = self.get_indexes(at);
-        eprintln!(
-            "record_index: {} \nchar_index: {}",
-            record_index, char_index
-        );
-        let record = PieceTableRecord {
-            buf_kind: BufKind::Add,
-            start: self.add_buf.len() as u32,
-            len: content.len() as u32,
-        };
-
-        // eprintln!("record to be inserted: {:#?}", record);
-
-        self.add_buf.push_str(content);
-
-        let should_split = if record_index > self.records.len() as u32 && char_index == 0 {
-            false
-        } else {
-            true
-        };
-
-        if should_split {
-            // eprintln!("Should Split");
-            self.split_and_add_record(record, record_index as usize, char_index);
-        } else {
-            // eprintln!("Should not Split");
-            self.add_record(record, record_index as usize);
-        }
-        self.metadata.text_len += record.len as usize;
     }
 
-    pub fn add_record(&mut self, record: PieceTableRecord, record_index: usize) {
+    pub fn insert_record(&mut self, record: PieceTableRecord, record_index: usize) {
         self.records.insert(record_index, record);
+        self.metadata.text_len += 1;
+    }
+    pub fn push_record(&mut self, record: PieceTableRecord) {
+        self.records.push(record);
+        self.metadata.text_len += 1;
     }
 
     fn get_indexes(&self, at: usize) -> (u32, u32) {
@@ -121,7 +149,7 @@ impl PieceTable {
         }
         return (self.records.len() as u32, 0);
     }
-    fn split_and_add_record(
+    fn split_and_insert_record(
         &mut self,
         record: PieceTableRecord,
         record_index: usize,
@@ -163,51 +191,74 @@ impl PieceTable {
 mod tests {
     use super::*;
 
-    #[test]
-    fn read_file_and_display() {
-        let table = PieceTable::from_path("samples/daffodils.txt");
-        // table.show();
-    }
+    // #[test]
+    // fn read_file_and_display() {
+    //     let table = PieceTable::from_path("samples/daffodils.txt");
+    //     // table.show();
+    // }
 
     #[test]
-    fn insert_chunk_fn() {
-        let mut table = PieceTable::from_path("samples/daffodils.txt");
-        let at = "I wandered lonely as a cloud 
-That floats on high o'er vales and hills, 
-When all at once I saw a crowd,
-"
-        .len();
-        let content = "\nA host, of golden daffodils; \nBeside the lake, beneath the trees, \nFluttering and dancing in the breeze.";
+    fn insert_at_end() {
+        let sample = include_str!("../samples/daffodils.txt");
+        let mut table = PieceTable::new();
 
-        table.insert_chunk(at, content);
+        for ch in sample.chars() {
+            table.insert_at_end(ch);
+        }
 
-        let at = "I wandered lonely as a cloud
-That floats on high o'er vales and hills,
-When all at once I saw a crowd,
-A host, of golden daffodils;
-Beside the lake, beneath the trees,
-Fluttering and dancing in the breeze.
-
-Continuous as the stars that shine
-And twinkle on the milky way,"
-            .len();
-        let content = "They stretched in never-ending line
-Along the margin of a bay:
-Ten thousand saw I at a glance,
-Tossing their heads in sprightly dance.";
-        table.insert_chunk(at, content);
-
-        // Inserting at the end
-        let at = table.metadata.text_len;
-        let content = "
-The waves beside them danced; but they
-Out-did the sparkling waves in glee:
-A poet could not but be gay,
-In such a jocund company:
-I gazed—and gazed—but little thought
-What wealth the show to me had brought:";
-        table.insert_chunk(at, content);
-
-        table.show();
+        let text: String = table.into();
+        eprintln!(
+            "+++++++PieceTable+++++++++++\n{}\nlen:{}\n++++++++++++++++",
+            text,
+            text.len()
+        );
+        eprintln!(
+            "+++++++Sample+++++++++++\n{}\nlen:{}\n++++++++++++++++",
+            sample,
+            sample.len()
+        );
+        assert_eq!(sample, &text);
     }
+
+    // #[test]
+    //     fn insert_chunk_fn() {
+    //         let mut table = PieceTable::from_path("samples/daffodils.txt");
+    //         let at = "I wandered lonely as a cloud
+    // That floats on high o'er vales and hills,
+    // When all at once I saw a crowd,
+    // "
+    //         .len();
+    //         let content = "\nA host, of golden daffodils; \nBeside the lake, beneath the trees, \nFluttering and dancing in the breeze.";
+    //
+    //         table.insert_chunk(at, content);
+    //
+    //         let at = "I wandered lonely as a cloud
+    // That floats on high o'er vales and hills,
+    // When all at once I saw a crowd,
+    // A host, of golden daffodils;
+    // Beside the lake, beneath the trees,
+    // Fluttering and dancing in the breeze.
+    //
+    // Continuous as the stars that shine
+    // And twinkle on the milky way,"
+    //             .len();
+    //         let content = "They stretched in never-ending line
+    // Along the margin of a bay:
+    // Ten thousand saw I at a glance,
+    // Tossing their heads in sprightly dance.";
+    //         table.insert_chunk(at, content);
+    //
+    //         // Inserting at the end
+    //         let at = table.metadata.text_len;
+    //         let content = "
+    // The waves beside them danced; but they
+    // Out-did the sparkling waves in glee:
+    // A poet could not but be gay,
+    // In such a jocund company:
+    // I gazed—and gazed—but little thought
+    // What wealth the show to me had brought:";
+    //         table.insert_chunk(at, content);
+    //
+    //         table.show();
+    //     }
 }

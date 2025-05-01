@@ -7,16 +7,28 @@ enum BufKind {
 }
 
 #[derive(Debug, Clone, Copy)]
-struct PieceTableRecord {
+pub struct PieceTableRecord {
     buf_kind: BufKind,
     start: u32,
     len: u32,
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+pub struct TableMetadata {
+    text_len: usize,
+}
+
+impl TableMetadata {
+    pub fn new() -> Self {
+        Self::default()
+    }
 }
 
 pub struct PieceTable {
     original: String,
     add_buf: String,
     records: Vec<PieceTableRecord>,
+    metadata: TableMetadata,
 }
 
 impl PieceTable {
@@ -31,6 +43,7 @@ impl PieceTable {
                 start: 0,
                 len: text_len as u32,
             }],
+            metadata: TableMetadata::new(),
         }
     }
     pub fn show(&self) {
@@ -48,15 +61,15 @@ impl PieceTable {
         }
     }
 
-    pub fn insert_chunk(&mut self, at: u32, content: &str) {
+    pub fn insert_chunk(&mut self, at: usize, content: &str) {
         if content.len() > u32::MAX as usize {
             return;
         }
-        eprintln!(
+        /* eprintln!(
             "content to be inserted: \nlen = {} \ncontents: `{}`",
             content.len(),
             content
-        );
+        ); */
         let (record_index, char_index) = self.get_indexes(at);
         eprintln!(
             "record_index: {} \nchar_index: {}",
@@ -67,26 +80,46 @@ impl PieceTable {
             start: self.add_buf.len() as u32,
             len: content.len() as u32,
         };
-        eprintln!("record to be inserted: {:#?}", record);
+
+        // eprintln!("record to be inserted: {:#?}", record);
+
         self.add_buf.push_str(content);
-        self.split_and_add_record(record, record_index as usize, char_index);
+
+        let should_split = if record_index > self.records.len() as u32 && char_index == 0 {
+            false
+        } else {
+            true
+        };
+
+        if should_split {
+            // eprintln!("Should Split");
+            self.split_and_add_record(record, record_index as usize, char_index);
+        } else {
+            // eprintln!("Should not Split");
+            self.add_record(record, record_index as usize);
+        }
+        self.metadata.text_len += record.len as usize;
     }
 
-    fn get_indexes(&self, at: u32) -> (u32, u32) {
+    pub fn add_record(&mut self, record: PieceTableRecord, record_index: usize) {
+        self.records.insert(record_index, record);
+    }
+
+    fn get_indexes(&self, at: usize) -> (u32, u32) {
         // return record and char index
         // iter through the records, sum up record.len
         // we have "at" which points to the index in the original text.
         let mut cumulative_sum = 0;
         for (i, record) in self.records.iter().enumerate() {
-            cumulative_sum += record.len;
+            cumulative_sum += record.len as usize;
             if cumulative_sum > at {
-                let rest = cumulative_sum - at;
-                let char_index = record.len - rest;
+                let rest = (cumulative_sum as usize) - at;
+                let char_index = (record.len as usize) - rest;
 
-                return (i as u32, char_index);
+                return (i as u32, char_index as u32);
             }
         }
-        return ((self.records.len() + 1) as u32, 0);
+        return (self.records.len() as u32, 0);
     }
     fn split_and_add_record(
         &mut self,
@@ -139,10 +172,42 @@ mod tests {
     #[test]
     fn insert_chunk_fn() {
         let mut table = PieceTable::from_path("samples/daffodils.txt");
-        table.insert_chunk(4, "huhuhu HAHAHAHAHAHAHAHAH");
-        table.insert_chunk(4, " Next Chunk ");
-        table.insert_chunk(15, " Third Chunk ");
-        table.insert_chunk(10, " Fourth Chunk");
+        let at = "I wandered lonely as a cloud 
+That floats on high o'er vales and hills, 
+When all at once I saw a crowd,
+"
+        .len();
+        let content = "\nA host, of golden daffodils; \nBeside the lake, beneath the trees, \nFluttering and dancing in the breeze.";
+
+        table.insert_chunk(at, content);
+
+        let at = "I wandered lonely as a cloud
+That floats on high o'er vales and hills,
+When all at once I saw a crowd,
+A host, of golden daffodils;
+Beside the lake, beneath the trees,
+Fluttering and dancing in the breeze.
+
+Continuous as the stars that shine
+And twinkle on the milky way,"
+            .len();
+        let content = "They stretched in never-ending line
+Along the margin of a bay:
+Ten thousand saw I at a glance,
+Tossing their heads in sprightly dance.";
+        table.insert_chunk(at, content);
+
+        // Inserting at the end
+        let at = table.metadata.text_len;
+        let content = "
+The waves beside them danced; but they
+Out-did the sparkling waves in glee:
+A poet could not but be gay,
+In such a jocund company:
+I gazed—and gazed—but little thought
+What wealth the show to me had brought:";
+        table.insert_chunk(at, content);
+
         table.show();
     }
 }
